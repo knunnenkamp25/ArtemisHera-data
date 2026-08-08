@@ -1,0 +1,123 @@
+name: State Votes Refresh
+run-name: "State votes: ${{ inputs.state || 'weekly refresh' }} ${{ inputs.session || '' }}"
+
+# This workflow lives in the DATA repo because that is where the data lives.
+# It previously sat in the app repo and committed to `data/state` there, which
+# stopped existing once the state data moved here — the run succeeded and then
+# failed at the commit step with nothing to add.
+#
+# Scripts are read from the public app repo (no token needed to check out a
+# public repo); the commit goes to this repo with the default GITHUB_TOKEN.
+#
+# Historical sessions are loaded once from Open States bulk CSV archives. This
+# keeps the CURRENT session current via the Open States v3 API.
+# Free tier: 500 requests/day, 1 req/sec — every run is capped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      state:
+        description: 'Full jurisdiction name (e.g. Virginia)'
+        required: true
+      session:
+        description: 'Session id (e.g. 2026). Defaults to the current year.'
+        required: false
+        default: ''
+      since:
+        description: 'ISO date to pull updates from (default: 8 days ago)'
+        required: false
+        default: ''
+
+  schedule:
+    - cron: '0 7 * * 1'   # Mondays 07:00 UTC
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out data repo
+        uses: actions/checkout@v4
+
+      - name: Check out app repo (scripts)
+        uses: actions/checkout@v4
+        with:
+          repository: knunnenkamp25/ArtemisHera
+          path: .app
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check OpenStates key is available
+        env:
+          OPENSTATES_KEY: ${{ secrets.OpenStates_Key }}
+        run: |
+          if [ -z "${OPENSTATES_KEY}" ]; then
+            echo "::error::Secret 'OpenStates_Key' is not visible to this workflow."
+            echo "Add it under Settings -> Secrets and variables -> Actions on"
+            echo "knunnenkamp25/ArtemisHera-data (secrets do not cross repositories)."
+            exit 1
+          fi
+          echo "Key present (${#OPENSTATES_KEY} characters)."
+
+      - name: Refresh requested session
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          OPENSTATES_KEY: ${{ secrets.OpenStates_Key }}
+          STATE: ${{ inputs.state }}
+          SESSION_IN: ${{ inputs.session }}
+          SINCE_IN: ${{ inputs.since }}
+        run: |
+          SESSION="${SESSION_IN:-$(date +%Y)}"
+          if [ -n "${SINCE_IN}" ]; then
+            python .app/scripts/refresh_openstates.py --state "${STATE}" --session "${SESSION}" --since "${SINCE_IN}" --base data/state
+          else
+            python .app/scripts/refresh_openstates.py --state "${STATE}" --session "${SESSION}" --base data/state
+          fi
+
+      - name: Weekly refresh of every state present
+        if: github.event_name == 'schedule'
+        env:
+          OPENSTATES_KEY: ${{ secrets.OpenStates_Key }}
+        run: |
+          YEAR=$(date +%Y)
+          COUNT=$(ls data/state | grep -cE '^[A-Z]{2}$' || echo 1)
+          [ "$COUNT" -lt 1 ] && COUNT=1
+          BUDGET=$((400 / COUNT)); [ "$BUDGET" -lt 20 ] && BUDGET=20
+          echo "Refreshing $COUNT state(s) at $BUDGET requests each"
+          python - <<'PYEOF' > /tmp/states.tsv
+          import json, os
+          names = {}
+          try:
+              for ab, e in json.load(open('data/state/sessions.json')).items():
+                  names[ab] = e.get('state_name', ab)
+          except Exception:
+              pass
+          for ab in sorted(os.listdir('data/state')):
+              if len(ab) == 2 and ab.isupper():
+                  print(f"{ab}\t{names.get(ab, ab)}")
+          PYEOF
+          while IFS=$'\t' read -r ab name; do
+            [ -z "$ab" ] && continue
+            echo "=== $name ($ab) $YEAR ==="
+            python .app/scripts/refresh_openstates.py --state "$name" --session "$YEAR" \
+              --base data/state --max-requests "$BUDGET" || echo "skip $ab"
+          done < /tmp/states.tsv
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # -- is required: without it git errors when nothing matched, which is
+          # the normal case for a quiet legislative week.
+          git add -A -- data/state || true
+          if git diff --staged --quiet; then
+            echo "No new rollcalls — nothing to commit."
+            exit 0
+          fi
+          git commit -m "State votes refresh: ${{ inputs.state || 'weekly' }} ${{ inputs.session || '' }}"
+          git pull --rebase origin main || true
+          git push
