@@ -3151,6 +3151,13 @@
   "state_name": "West Virginia",
   "sessions": [
    {
+    "id": "2026",
+    "name": "2026 Session",
+    "year_start": 2026,
+    "year_end": 2026,
+    "people_count": 136
+   },
+   {
     "id": "2024",
     "name": "2024 Session",
     "year_start": 2024,
