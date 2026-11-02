@@ -922,19 +922,18 @@
   "state_name": "Hawaii",
   "sessions": [
    {
+    "id": "2026",
+    "name": "2026 Session",
+    "year_start": 2026,
+    "year_end": 2026,
+    "people_count": 84
+   },
+   {
     "id": "2025",
     "name": "2025 Session",
     "year_start": 2025,
     "year_end": 2025,
     "people_count": 79,
-    "special": false
-   },
-   {
-    "id": "2026",
-    "name": "2025\u20132026 Session",
-    "year_start": 2025,
-    "year_end": 2026,
-    "people_count": 82,
     "special": false
    },
    {
@@ -1599,7 +1598,7 @@
     "name": "2026 Session",
     "year_start": 2026,
     "year_end": 2026,
-    "people_count": 0
+    "people_count": 186
    },
    {
     "id": "2017S1",
@@ -3154,7 +3153,7 @@
     "name": "2026 Session",
     "year_start": 2026,
     "year_end": 2026,
-    "people_count": 136
+    "people_count": 137
    },
    {
     "id": "2024",
